@@ -1,4 +1,4 @@
-# Gemini Agent CLI
+# Universal Agent CLI
 
 A powerful, agentic Command-Line Interface built with the **Google Agent Development Kit (ADK)** and **Gemini 2.5 Flash**. This agent can reasoning, use local tools, and connect to Model Context Protocol (MCP) servers.
 
