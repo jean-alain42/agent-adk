@@ -2,25 +2,55 @@ import { Gemini, LlmAgent, FunctionTool, Runner, InMemorySessionService, stringi
 import * as dotenv from "dotenv";
 import * as readline from "readline";
 import { z } from "zod";
+import chalk from "chalk";
+import ora from "ora";
+import boxen from "boxen";
+import figlet from "figlet";
+import gradient from "gradient-string";
 
-// Load environment variables from .env file
+// Load environment variables
 dotenv.config();
 
-// Suppress internal ADK info logs for a clean CLI experience
+// Suppress internal ADK logs
 setLogLevel(LogLevel.WARN);
 
-// Retrieve the API key from environment variables
 const apiKey = process.env.GEMINI_API_KEY;
 
-// Ensure the API key exists before proceeding
 if (!apiKey || apiKey === "YOUR_API_KEY_HERE") {
-  console.error("Please provide a valid GEMINI_API_KEY in the .env file");
+  console.error(chalk.red.bold("✖ Error: Please provide a valid GEMINI_API_KEY in the .env file"));
   process.exit(1);
 }
 
 // ---------------------------------------------------------
-// 1. Define Native Tools (Functions defined in this file)
+// 1. UI Utility Functions
 // ---------------------------------------------------------
+
+/**
+ * Renders a futuristic ASCII banner
+ */
+function renderBanner() {
+  const bannerText = figlet.textSync("Universal Agent", { font: "Slant" });
+  console.log(gradient.pastel.multiline(bannerText));
+  console.log(chalk.cyan.bold("---------------------------------------------------------"));
+  console.log(chalk.magenta("  The Future of Autonomous CLI Intelligence is Here"));
+  console.log(chalk.cyan.bold("---------------------------------------------------------") + "\n");
+}
+
+/**
+ * Simulates a typing effect for agent responses
+ */
+async function typeMessage(text: string) {
+  for (const char of text) {
+    process.stdout.write(char);
+    // Control typing speed (much faster for better terminal output)
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+}
+
+// ---------------------------------------------------------
+// 2. Tools & Toolsets
+// ---------------------------------------------------------
+
 const getCurrentTimeTool = new FunctionTool({
   name: "getCurrentTime",
   description: "Returns the current local time.",
@@ -30,31 +60,18 @@ const getCurrentTimeTool = new FunctionTool({
   },
 });
 
-// ---------------------------------------------------------
-// 2. Configure MCP Toolsets (Model Context Protocol)
-// ---------------------------------------------------------
-// You can connect to any MCP-compliant server. Uncomment/Modify as needed:
-
-// Example A: Local Standard I/O Server (e.g., a local script or binary)
 const localMcpTools = new MCPToolset({
   type: "StdioConnectionParams",
   serverParams: {
     command: "npx",
-    args: ["-y", "@modelcontextprotocol/server-everything"], // Useful test server
+    args: ["-y", "@modelcontextprotocol/server-everything"],
   },
 });
 
-/* 
-// Example B: Remote SSE Server (e.g., a server running on a URL)
-const remoteMcpTools = new MCPToolset({
-  type: "StreamableHTTPConnectionParams",
-  url: "http://localhost:8788/mcp",
-});
-*/
+// ---------------------------------------------------------
+// 3. Agent & Runner Setup
+// ---------------------------------------------------------
 
-// ---------------------------------------------------------
-// 3. Initialize Agent & Runner
-// ---------------------------------------------------------
 const gemini = new Gemini({
   apiKey: apiKey,
   model: "gemini-2.5-flash",
@@ -64,12 +81,11 @@ const agent = new LlmAgent({
   name: "GeminiAgent",
   model: gemini,
   instruction: "You are a helpful assistant. Use tools when necessary to fulfill user requests.",
-  // Register both native tools and MCP toolsets here
   tools: [getCurrentTimeTool, localMcpTools],
 });
 
 const sessionService = new InMemorySessionService();
-const appName = "GeminiCLI";
+const appName = "UniversalCLI";
 const userId = "user-1";
 const sessionId = "session-1";
 
@@ -80,53 +96,65 @@ const runner = new Runner({
 });
 
 // ---------------------------------------------------------
-// 4. Interactive Chat Loop
+// 4. Main Chat Interface
 // ---------------------------------------------------------
+
 const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout,
 });
 
 async function main() {
-  // Create a session in the session service (required by ADK)
-  await sessionService.createSession({
-    appName,
-    userId,
-    sessionId,
-  });
+  await sessionService.createSession({ appName, userId, sessionId });
 
-  console.log("Chat with Gemini Agent (type 'exit' to quit)");
+  renderBanner();
+  console.log(chalk.dim("Type 'exit' to quit the mission.\n"));
 
   const askQuestion = () => {
-    rl.question("You: ", async (msg) => {
+    rl.question(chalk.cyan.bold("❯ User: "), async (msg) => {
       if (msg.toLowerCase() === "exit") {
-        // Close MCP connections before exiting
+        console.log(chalk.yellow("\n[SYSTEM]: Connection terminated. Goodbye."));
         await localMcpTools.close();
         rl.close();
         return;
       }
 
-      try {
-        process.stdout.write("Agent: ");
+      // Start the "thinking" spinner
+      const spinner = ora({
+        text: chalk.magenta("Agent is processing signal..."),
+        color: "magenta"
+      }).start();
 
+      try {
         const iterator = runner.runAsync({
           userId: userId,
           sessionId: sessionId,
           newMessage: { role: 'user', parts: [{ text: msg }] }
         });
 
+        let fullResponse = "";
+        let firstChunk = true;
+
         for await (const event of iterator) {
           if (event.author !== "user") {
             const text = stringifyContent(event);
             if (text) {
-              process.stdout.write(text);
+              if (firstChunk) {
+                spinner.stop(); // Stop spinner when first content arrives
+                process.stdout.write(chalk.green.bold("❯ Agent: "));
+                firstChunk = false;
+              }
+              fullResponse += text;
+              await typeMessage(text);
             }
           }
         }
-        console.log();
+
+        console.log("\n"); // Newline after response
 
       } catch (error) {
-        console.error("\n[Error during execution]:", error);
+        spinner.fail(chalk.red("Signal lost. Error occurred."));
+        console.error(chalk.red(`\n[ERROR]: ${error}`));
       }
 
       if (!(rl as any).closed) {
